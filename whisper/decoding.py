@@ -6,6 +6,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 from torch.distributions import Categorical
+from functorch.experimental.control_flow import cond
 
 from .audio import CHUNK_LENGTH
 from .tokenizer import Tokenizer, get_tokenizer
@@ -502,8 +503,14 @@ class ApplyTimestampRules(LogitFilter):
                 dim=-1
             )
             max_text_token_logprob = logprobs[k, : self.tokenizer.timestamp_begin].max()
-            if timestamp_logprob > max_text_token_logprob:
+            
+            def true_fn(logits):
                 logits[k, : self.tokenizer.timestamp_begin] = -np.inf
+                return logits
+            def false_fn(logits):
+                return logits
+            
+            cond(timestamp_logprob > max_text_token_logprob, true_fn, false_fn, [logits])
 
 
 class DecodingTask:
