@@ -672,7 +672,8 @@ class DecodingTask:
             lang_tokens, lang_probs = self.model.detect_language(
                 audio_features, self.tokenizer
             )
-            languages = [max(probs, key=probs.get) for probs in lang_probs]
+            if self.options.task == "lang_id":
+                languages = [max(probs, key=probs.get) for probs in lang_probs]
             if self.options.language is None:
                 tokens[:, self.sot_index + 1] = lang_tokens  # write language tokens
 
