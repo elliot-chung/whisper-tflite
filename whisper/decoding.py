@@ -573,7 +573,7 @@ class DecodingTask:
                 )
             self.logit_filters.append(
                 ApplyTimestampRules(
-                    tokenizer, self.sample_begin, max_initial_timestamp_index
+                    self.tokenizer, self.sample_begin, max_initial_timestamp_index
                 )
             )
 
