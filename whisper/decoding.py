@@ -504,13 +504,13 @@ class ApplyTimestampRules(LogitFilter):
             )
             max_text_token_logprob = logprobs[k, : self.tokenizer.timestamp_begin].max()
             
-            def true_fn(logits):
-                logits[k, : self.tokenizer.timestamp_begin] = -np.inf
+            def true_fn(logits, timestamp_begin):
+                logits[k, : timestamp_begin] = -np.inf
                 return logits
-            def false_fn(logits):
+            def false_fn(logits, timestamp_begin):
                 return logits
             
-            cond(timestamp_logprob > max_text_token_logprob, true_fn, false_fn, [logits])
+            cond(timestamp_logprob > max_text_token_logprob, true_fn, false_fn, [logits, self.tokenizer.timestamp_begin])
 
 
 class DecodingTask:
