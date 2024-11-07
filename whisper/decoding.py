@@ -120,6 +120,7 @@ class DecodingResult:
     language: str
     language_probs: Optional[Dict[str, float]] = None
     tokens: List[int] = field(default_factory=list)
+    tokensTensor: List[List[Tensor]] = []
     text: str = ""
     avg_logprob: float = np.nan
     no_speech_prob: float = np.nan
@@ -716,10 +717,10 @@ class DecodingTask:
         n_audio: int = mel.shape[0]
 
         audio_features: Tensor = self._get_audio_features(mel)  # encoder forward pass
-        tokens: Tensor = torch.tensor([self.initial_tokens]).repeat(n_audio, 1)
+        tokensTensor: Tensor = torch.tensor([self.initial_tokens]).repeat(n_audio, 1)
 
         # detect language if requested, overwriting the language token
-        languages, language_probs = self._detect_language(audio_features, tokens)
+        languages, language_probs = self._detect_language(audio_features, tokensTensor)
         if self.options.task == "lang_id":
             return [
                 DecodingResult(
@@ -731,29 +732,29 @@ class DecodingTask:
             ]
 
         # repeat text tensors by the group size, for beam search or best-of-n sampling
-        tokens = tokens.repeat_interleave(self.n_group, dim=0).to(audio_features.device)
+        tokensTensor = tokensTensor.repeat_interleave(self.n_group, dim=0).to(audio_features.device)
 
         # call the main sampling loop
-        tokens, sum_logprobs, no_speech_probs = self._main_loop(audio_features, tokens)
+        tokensTensor, sum_logprobs, no_speech_probs = self._main_loop(audio_features, tokensTensor)
 
         # reshape the tensors to have (n_audio, n_group) as the first two dimensions
         audio_features = audio_features[:: self.n_group]
         no_speech_probs = no_speech_probs[:: self.n_group]
         assert audio_features.shape[0] == len(no_speech_probs) == n_audio
 
-        tokens = tokens.reshape(n_audio, self.n_group, -1)
+        tokensTensor = tokensTensor.reshape(n_audio, self.n_group, -1)
         sum_logprobs = sum_logprobs.reshape(n_audio, self.n_group)
 
         # get the final candidates for each group, and slice between the first sampled token and EOT
-        tokens, sum_logprobs = self.decoder.finalize(tokens, sum_logprobs)
-        tokens: List[List[Tensor]] = [
+        tokensTensor, sum_logprobs = self.decoder.finalize(tokensTensor, sum_logprobs)
+        tokensTensor: List[List[Tensor]] = [
             [t[self.sample_begin : (t == tokenizer.eot).nonzero()[0, 0]] for t in s]
-            for s in tokens
+            for s in tokensTensor
         ]
 
         # select the top-ranked sample in each group
-        selected = self.sequence_ranker.rank(tokens, sum_logprobs)
-        tokens: List[List[int]] = [t[i].tolist() for i, t in zip(selected, tokens)]
+        selected = self.sequence_ranker.rank(tokensTensor, sum_logprobs)
+        tokens: List[List[int]] = [t[i].tolist() for i, t in zip(selected, tokensTensor)]
         texts: List[str] = [tokenizer.decode(t).strip() for t in tokens]
 
         sum_logprobs: List[float] = [lp[i] for i, lp in zip(selected, sum_logprobs)]
@@ -765,6 +766,7 @@ class DecodingTask:
             texts,
             languages,
             tokens,
+            tokensTensor,
             audio_features,
             avg_logprobs,
             no_speech_probs,
@@ -777,13 +779,14 @@ class DecodingTask:
                 audio_features=features,
                 language=language,
                 tokens=tokens,
+                tokensTensor=tokensTensor,
                 text=text,
                 avg_logprob=avg_logprob,
                 no_speech_prob=no_speech_prob,
                 temperature=self.options.temperature,
                 compression_ratio=compression_ratio(text),
             )
-            for text, language, tokens, features, avg_logprob, no_speech_prob in zip(
+            for text, language, tokens, tokensTensor, features, avg_logprob, no_speech_prob in zip(
                 *fields
             )
         ]
